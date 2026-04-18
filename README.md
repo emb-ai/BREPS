@@ -1,5 +1,7 @@
 # [AAAI 2026] BREPS: Bounding-Box Robustness Evaluation of Promptable Segmentation
 [![Paper](https://img.shields.io/badge/Paper-arXiv-red)](https://arxiv.org/abs/2601.15123)
+[![Paper](https://img.shields.io/badge/Paper-AAAI-blue)](https://ojs.aaai.org/index.php/AAAI/article/view/37757)
+
 
 This repository contains offiсial dataset and code implementation for the paper:  
 [BREPS: Bounding-Box Robustness Evaluation of Promptable Segmentation](https://arxiv.org/abs/2601.15123)
@@ -30,20 +32,22 @@ pip install -e .
 | DAVIS       | 345 images with one object each (test) |       [DAVIS.zip (43 MB)][DAVIS]        |
 | COCO_MVal   | 800 images with 800 instances (test)   |   [COCO_MVal.zip (127 MB)][COCO_MVal]   |
 | TETRIS      | 2000 images with 2531 instances (test) |      [TETRIS.zip (6.3 GB)][TETRIS]      |
-| ACDC        | 100 images with 100 instances (test)   |        [ACDC.zip (14 MB)][ACDC]         |
-| BUID        | 780 images with 780 instances (test)   |        [BUID.zip (24 MB)][BUID]         |
+| PASCAL-VOC  | 1000 images with 1000 instances (sampled, test) |      [PASCAL.zip (112 MB)][PASCAL]      |
+| ADE20K      | 1000 images with 1000 instances (sampled, test) |      [ADE20K.zip (125 MB)][ADE20K]      |
+| ACDC        | 100 images with 100 instances (test)   |        [ACDC.zip (13 MB)][ACDC]         |
+| BUID        | 503 images with 503 instances (benign and malignant, test)   |        [BUID.zip (24 MB)][BUID]         |
 | MedScribble | 56 images with 56 instances (test)     | [MedScribble.zip (2.5 MB)][MedScribble] |
 
-[GrabCut]: https://github.com/saic-vul/fbrs_interactive_segmentation/releases/download/v1.0/GrabCut.zip
-[Berkeley]: https://github.com/saic-vul/fbrs_interactive_segmentation/releases/download/v1.0/Berkeley.zip
-[DAVIS]: https://github.com/saic-vul/fbrs_interactive_segmentation/releases/download/v1.0/DAVIS.zip
-[COCO_MVal]: https://github.com/saic-vul/fbrs_interactive_segmentation/releases/download/v1.0/COCO_MVal.zip
+[GrabCut]: https://drive.google.com/file/d/1tU17eJaevYd5PQAwzEK6oG1N9eBJORC4/view?usp=sharing
+[Berkeley]: https://drive.google.com/file/d/1yStolKW8AnS5rYm3VhgnID_XReNCXbEJ/view?usp=sharing
+[DAVIS]: https://drive.google.com/file/d/1DhwMOqbwH4tcIrVfqtSczdofjdHHnMCJ/view?usp=sharing
+[COCO_MVal]: https://drive.google.com/file/d/1oz1VT8YqykQFfx_Vtp_wtYFGz5mYBOnp/view?usp=sharing
 [TETRIS]: https://drive.google.com/file/d/1iJgohY1XBSnY-kRUoaRZJlu0HZbyHcyK/view?usp=sharing
-[ACDC]: https://www.creatis.insa-lyon.fr/Challenge/acdc/databases.html
-[BUID]: https://www.kaggle.com/datasets/aryashah2k/breast-ultrasound-images-dataset
-[MedScribble]: https://github.com/halleewong/ScribblePrompt/tree/main/MedScribble
-
----
+[PASCAL]: https://drive.google.com/file/d/1MAbjGogMbYq8mg_H-JqUmsHwfxfkUniY/view?usp=sharing
+[ADE20K]: https://drive.google.com/file/d/1sc__FtGU3mogxeevvOhWl9ajuRaEdIyB/view?usp=sharing
+[ACDC]: https://drive.google.com/file/d/158tEwGGEWHR6F6Gk7BPM910fKwwJIhT5/view?usp=sharing
+[BUID]: https://drive.google.com/file/d/1W83P700gzEvdD1KLJeQw5j0NyE-WwllJ/view?usp=sharing
+[MedScribble]: https://drive.google.com/file/d/1fpuP74HdMsob6BiPdvVH2lrb7rzQfY-H/view?usp=sharing
 
 ## Real-Users Study:
 
@@ -108,9 +112,14 @@ If you find this work useful for your research, please cite the original paper:
 
 ```
 @article{moskalenko2026breps,
-  title={BREPS: Bounding-Box Robustness Evaluation of Promptable Segmentation},
-  author={Moskalenko, Andrey and Kuznetsov, Danil and Dudko, Irina and Iasakova, Anastasiia and Boldyrev, Nikita and Shepelev, Denis and Spiridonov, Andrei and Kuznetsov, Andrey and Shakhuro, Vlad},
-  journal={arXiv preprint arXiv:2601.15123},
-  year={2026}
+ title={BREPS: Bounding-Box Robustness Evaluation of Promptable Segmentation},
+ author={Moskalenko, Andrey and Kuznetsov, Danil and Dudko, Irina and Iasakova, Anastasiia and Boldyrev, Nikita and Shepelev, Denis and Spiridonov, Andrei and Kuznetsov, Andrey and Shakhuro, Vlad},
+ journal={Proceedings of the AAAI Conference on Artificial Intelligence},
+ volume={40},
+ number={10},
+ year={2026},
+ month={Mar.},
+ pages={8107-8115},
+ DOI={10.1609/aaai.v40i10.37757}
 }
 ```
