@@ -21,7 +21,7 @@ pip install -e .
 
 ## Prepare Datasets & Models Checkpoints
 
-#### This project builds upon on [RITM](https://github.com/saic-vul/ritm_interactive_segmentation) and [TETRIS](https://arxiv.org/abs/2402.06132),and so it uses the same dataset structure and evaluation scripts. Thus, you should configure the paths to the datasets in [config.yml](./config.yml). We measured out BREPS attack on datasets below.
+#### This project builds upon on [RITM](https://github.com/supervisely-ecosystem/ritm-interactive-segmentation) and [TETRIS](https://arxiv.org/abs/2402.06132),and so it uses the same dataset structure and evaluation scripts. Thus, you should configure the paths to the datasets in [config.yml](./config.yml). We measured out BREPS attack on datasets below.
 
 ---
 
