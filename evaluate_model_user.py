@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
+
 SAMMED2D_ALLOWED_PREFIXES = ("ACDC", "BUID", "MedScribble")
 
 
@@ -19,19 +20,28 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("mode", nargs="?", default="NoBRS")
+
     parser.add_argument(
         "--family",
         type=str,
         required=True,
-        choices=["sam", "robustsam", "mobile_sam", "sam2", "sammed2d", "samhq"],
+        choices=[
+            "sam",
+            "robustsam",
+            "mobile_sam",
+            "sam2",
+            "sammed2d",
+            "samhq",
+            "medsam",
+        ],
     )
+
     parser.add_argument("--model_type", type=str, required=True)
     parser.add_argument("--checkpoint", type=str, required=True)
 
     parser.add_argument("--print-ious", action="store_true")
     parser.add_argument("--save-ious", action="store_true")
     parser.add_argument("--datasets", type=str, default="FOR_TEST")
-    parser.add_argument("--n-clicks", type=int, default=1)
     parser.add_argument("--n_workers", type=int, default=1)
     parser.add_argument("--iou-analysis", action="store_true")
     parser.add_argument("--thresh", type=float, default=0.5)
@@ -43,7 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output_dir", type=str, default="real_user_data")
     parser.add_argument("--batch_size", type=int, default=16)
 
-    # sammed2d-specific
+    # SAM-Med2D specific.
+    # В старом рабочем запуске SAM-Med2D использовался image_size=256.
     parser.add_argument("--image_size", type=int, default=256)
     parser.add_argument(
         "--no_encoder_adapter",
@@ -91,8 +102,12 @@ def resolve_dataset_paths(args: argparse.Namespace) -> Tuple[str, str, str]:
             return images_dir, prompts_dir, masks_dir
 
     checked = "\n".join(
-        [f"images={a}, prompts={b}, masks={c}" for a, b, c in candidates[dataset_name]]
+        [
+            f"images={a}, prompts={b}, masks={c}"
+            for a, b, c in candidates[dataset_name]
+        ]
     )
+
     raise FileNotFoundError(
         f"Could not resolve dataset directories for {dataset_name}. Checked:\n{checked}"
     )
@@ -101,6 +116,7 @@ def resolve_dataset_paths(args: argparse.Namespace) -> Tuple[str, str, str]:
 def get_prompts_by_image(images_dir: str, prompts_dir: str) -> Dict[str, List[Path]]:
     image_paths = glob.glob(os.path.join(images_dir, "*.png"))
     prompt_paths = {x.stem: x for x in Path(prompts_dir).glob("*.png")}
+
     samples_by_image: Dict[str, List[Path]] = {}
 
     for prompt_path in sorted(prompt_paths.values()):
@@ -111,6 +127,7 @@ def get_prompts_by_image(images_dir: str, prompts_dir: str) -> Dict[str, List[Pa
             image_name = "BUID_1"
 
         matched = [img for img in image_paths if image_name == Path(img).stem]
+
         if len(matched) != 1:
             raise AssertionError(
                 f"Image match error for prompt {prompt_path}: {matched}"
@@ -124,41 +141,84 @@ def get_prompts_by_image(images_dir: str, prompts_dir: str) -> Dict[str, List[Pa
 
 def read_mask_gray(mask_path: str) -> np.ndarray:
     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+
     if mask is None:
         raise FileNotFoundError(f"Mask not found: {mask_path}")
+
     return mask
 
 
 def get_bbox_from_mask(mask: np.ndarray) -> np.ndarray:
     rows = np.any(mask, axis=1)
     cols = np.any(mask, axis=0)
+
     if not rows.any() or not cols.any():
         raise ValueError("Empty prompt mask encountered.")
 
     rmin, rmax = np.where(rows)[0][[0, -1]]
     cmin, cmax = np.where(cols)[0][[0, -1]]
+
+    # SAM-style box format: x_min, y_min, x_max, y_max
     return np.array([cmin, rmin, cmax, rmax], dtype=np.float32)
 
 
 def calculate_iou(
-    pred_masks: np.ndarray, gt_masks: np.ndarray, eps: float = 1e-6
+    pred_masks: np.ndarray,
+    gt_masks: np.ndarray,
+    eps: float = 1e-6,
 ) -> np.ndarray:
     pred = pred_masks.astype(bool).reshape(pred_masks.shape[0], -1)
     gt = gt_masks.astype(bool).reshape(gt_masks.shape[0], -1)
+
     inter = np.logical_and(pred, gt).sum(axis=1).astype(np.float32)
     union = np.logical_or(pred, gt).sum(axis=1).astype(np.float32)
+
     return inter / (union + eps)
 
 
-def load_standard_predictor(family: str, model_type: str, checkpoint: str, device: str):
+def batch_iou_torch(
+    gt_masks: torch.Tensor,
+    pred_masks: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    if gt_masks.ndim == 4 and gt_masks.size(1) == 1:
+        gt = gt_masks.squeeze(1).bool()
+    else:
+        gt = gt_masks.bool()
+
+    if pred_masks.ndim == 4 and pred_masks.size(1) == 1:
+        pred = pred_masks.squeeze(1).bool()
+    else:
+        pred = pred_masks.bool()
+
+    gt_flat = gt.flatten(1)
+    pred_flat = pred.flatten(1)
+
+    inter = (gt_flat & pred_flat).sum(dim=1).float()
+    union = (gt_flat | pred_flat).sum(dim=1).float()
+
+    return inter / (union + eps)
+
+
+def load_standard_predictor(
+    family: str,
+    model_type: str,
+    checkpoint: str,
+    device: str,
+):
     if family == "sam":
         from segment_anything import sam_model_registry, SamPredictor
         from segment_anything.utils.transforms import ResizeLongestSide
+
     elif family in {"robustsam", "mobile_sam"}:
         from custom_builds.MobileSAM.mobile_sam import sam_model_registry, SamPredictor
-        from custom_builds.MobileSAM.mobile_sam.utils.transforms import (
-            ResizeLongestSide,
-        )
+        from custom_builds.MobileSAM.mobile_sam.utils.transforms import ResizeLongestSide
+
+    elif family == "medsam":
+        from medsam.build_sam import sam_model_registry
+        from medsam.predictor import SamPredictor
+        from medsam.utils.transforms import ResizeLongestSide
+
     else:
         raise ValueError(f"Unsupported standard family: {family}")
 
@@ -167,8 +227,14 @@ def load_standard_predictor(family: str, model_type: str, checkpoint: str, devic
     model.eval()
 
     predictor = SamPredictor(model)
-    target_length = getattr(model.image_encoder, "img_size", 1024)
+
+    if family == "medsam":
+        target_length = 1024
+    else:
+        target_length = getattr(model.image_encoder, "img_size", 1024)
+
     resize = ResizeLongestSide(target_length)
+
     return predictor, resize
 
 
@@ -197,31 +263,46 @@ def load_sammed2d_predictor(
 
     predictor = SammedPredictor(model)
     resize = ResizeLongestSide(image_size)
+
     return predictor, resize
 
 
 @torch.inference_mode()
 def evaluate_standard_family(
-    args: argparse.Namespace, images_dir: str, prompts_dir: str, masks_dir: str
+    args: argparse.Namespace,
+    images_dir: str,
+    prompts_dir: str,
+    masks_dir: str,
 ) -> pd.DataFrame:
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    predictor, resize = load_standard_predictor(
-        args.family, args.model_type, args.checkpoint, device
-    )
-    dataset_samples = get_prompts_by_image(images_dir, prompts_dir)
 
+    predictor, resize = load_standard_predictor(
+        family=args.family,
+        model_type=args.model_type,
+        checkpoint=args.checkpoint,
+        device=device,
+    )
+
+    dataset_samples = get_prompts_by_image(images_dir, prompts_dir)
     all_rows = []
+
     for img_path, prompt_paths in tqdm(
-        dataset_samples.items(), desc=f"{args.family}:{args.model_type}"
+        dataset_samples.items(),
+        desc=f"{args.family}:{args.model_type}",
     ):
         image = cv2.imread(str(img_path))
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {img_path}")
+
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         gt_mask_path = str(Path(masks_dir) / f"{Path(img_path).stem}.png")
         gt_mask = read_mask_gray(gt_mask_path)
 
         gt_mask_t = resize.apply_image_torch(
-            torch.tensor(gt_mask, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            torch.tensor(gt_mask, dtype=torch.float32)
+            .unsqueeze(0)
+            .unsqueeze(0)
         )
         gt_mask_t = (gt_mask_t > 0).float()
 
@@ -233,14 +314,22 @@ def evaluate_standard_family(
         boxes = []
         for mask_path in current_paths:
             prompt_mask = read_mask_gray(str(mask_path))
+
             prompt_mask_t = resize.apply_image_torch(
-                torch.tensor(prompt_mask, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                torch.tensor(prompt_mask, dtype=torch.float32)
+                .unsqueeze(0)
+                .unsqueeze(0)
             )
             prompt_mask_t = (prompt_mask_t > 0).float()
-            boxes.append(get_bbox_from_mask(prompt_mask_t.cpu().numpy()[0, 0]))
+
+            bbox = get_bbox_from_mask(prompt_mask_t.cpu().numpy()[0, 0])
+            boxes.append(bbox)
 
         input_boxes = torch.tensor(np.stack(boxes), device=device)
-        input_boxes = resize.apply_boxes_torch(input_boxes, resized_image.shape[:2])
+        input_boxes = resize.apply_boxes_torch(
+            input_boxes,
+            resized_image.shape[:2],
+        )
 
         pred_masks, _, _ = predictor.predict_torch(
             point_coords=None,
@@ -253,6 +342,7 @@ def evaluate_standard_family(
 
         pred_np = pred_masks.detach().cpu().numpy().squeeze(1) > args.thresh
         gt_np = gt_stack.detach().cpu().numpy().squeeze(1) > 0
+
         ious = calculate_iou(pred_np, gt_np)
 
         for idx, mask_path in enumerate(current_paths):
@@ -273,15 +363,27 @@ def evaluate_standard_family(
 
 @torch.inference_mode()
 def evaluate_sammed2d_family(
-    args: argparse.Namespace, images_dir: str, prompts_dir: str, masks_dir: str
+    args: argparse.Namespace,
+    images_dir: str,
+    prompts_dir: str,
+    masks_dir: str,
 ) -> pd.DataFrame:
+    """
+    SAM-Med2D evaluation path is intentionally close to the old standalone
+    SAM-Med2D script:
+      - image_size = 256
+      - encoder_adapter = True
+      - ResizeLongestSide(256)
+      - IoU is computed by batch_iou_torch(gt_stack, pred_masks)
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
     predictor, resize = load_sammed2d_predictor(
         model_type=args.model_type,
         checkpoint=args.checkpoint,
         device=device,
-        image_size=args.image_size,
-        encoder_adapter=args.encoder_adapter,
+        image_size=256,
+        encoder_adapter=True,
     )
 
     dataset_samples = get_prompts_by_image(images_dir, prompts_dir)
@@ -293,17 +395,22 @@ def evaluate_sammed2d_family(
     }
 
     all_rows = []
+
     for img_path, prompt_paths in tqdm(
-        dataset_samples.items(), desc=f"sammed2d:{args.model_type}"
+        dataset_samples.items(),
+        desc=f"sammed2d:{args.model_type}",
     ):
         image = cv2.imread(str(img_path))
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {img_path}")
+
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         gt_mask_path = str(Path(masks_dir) / f"{Path(img_path).stem}.png")
         gt_mask = read_mask_gray(gt_mask_path)
 
         gt_mask_t = resize.apply_image_torch(
-            torch.tensor(gt_mask, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            torch.Tensor(gt_mask).unsqueeze(0).unsqueeze(0)
         )
         gt_mask_t = (gt_mask_t > 0).float()
 
@@ -315,14 +422,20 @@ def evaluate_sammed2d_family(
         boxes = []
         for mask_path in current_paths:
             prompt_mask = read_mask_gray(str(mask_path))
+
             prompt_mask_t = resize.apply_image_torch(
-                torch.tensor(prompt_mask, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                torch.Tensor(prompt_mask).unsqueeze(0).unsqueeze(0)
             )
             prompt_mask_t = (prompt_mask_t > 0).float()
-            boxes.append(get_bbox_from_mask(prompt_mask_t.cpu().numpy()[0, 0]))
+
+            bbox = get_bbox_from_mask(prompt_mask_t.cpu().numpy()[0, 0])
+            boxes.append(bbox)
 
         input_boxes = torch.tensor(np.stack(boxes), device=device)
-        input_boxes = resize.apply_boxes_torch(input_boxes, resized_image.shape[:2])
+        input_boxes = resize.apply_boxes_torch(
+            input_boxes,
+            resized_image.shape[:2],
+        )
 
         pred_masks, _, _ = predictor.predict_torch(
             point_coords=None,
@@ -333,18 +446,16 @@ def evaluate_sammed2d_family(
 
         gt_stack = torch.stack([gt_mask_t] * len(current_paths)).to(device)
 
-        pred_np = pred_masks.detach().cpu().numpy().squeeze(1) > args.thresh
-        gt_np = gt_stack.detach().cpu().numpy().squeeze(1) > 0
-        ious = calculate_iou(pred_np, gt_np)
+        ious = batch_iou_torch(gt_stack, pred_masks)
 
         for idx, mask_path in enumerate(current_paths):
             all_rows.append(
                 {
                     "image_path": str(img_path),
                     "mask_path": str(mask_path),
-                    "iou": float(ious[idx]),
+                    "iou": float(ious[idx].detach().cpu()),
                     "bbox": input_boxes[idx].detach().cpu().tolist(),
-                    "family": args.family,
+                    "family": "sammed2d",
                     "model_type": args.model_type,
                     "checkpoint": args.checkpoint,
                 }
@@ -363,13 +474,16 @@ def sam2_model_cfg(model_type: str) -> str:
         "small": "configs/sam2.1/sam2.1_hiera_s.yaml",
         "large": "configs/sam2.1/sam2.1_hiera_l.yaml",
     }
+
     if model_type not in mapping:
         raise ValueError(f"Unsupported SAM2 model_type: {model_type}")
+
     return mapping[model_type]
 
 
 def set_image_as_batch_sam2(predictor, image: np.ndarray, batch_size: int):
     predictor.set_image(image)
+
     single_embed = predictor._features["image_embed"]
     single_high_res = predictor._features["high_res_feats"]
 
@@ -379,20 +493,26 @@ def set_image_as_batch_sam2(predictor, image: np.ndarray, batch_size: int):
             feat.repeat(batch_size, 1, 1, 1) for feat in single_high_res
         ],
     }
+
     predictor._is_image_set = True
     predictor._is_batch = True
     predictor._orig_hw = [predictor._orig_hw[0]] * batch_size
+
     return predictor
 
 
 @torch.inference_mode()
 def evaluate_sam2_family(
-    args: argparse.Namespace, images_dir: str, prompts_dir: str, masks_dir: str
+    args: argparse.Namespace,
+    images_dir: str,
+    prompts_dir: str,
+    masks_dir: str,
 ) -> pd.DataFrame:
     from custom_builds.sam2.sam2.build_sam import build_sam2
     from custom_builds.sam2.sam2.sam2_image_predictor import SAM2ImagePredictor
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
     model_cfg = sam2_model_cfg(args.model_type)
     sam2_model = build_sam2(model_cfg, args.checkpoint, device=device)
     sam2_model.eval()
@@ -401,27 +521,39 @@ def evaluate_sam2_family(
     dataset_samples = get_prompts_by_image(images_dir, prompts_dir)
 
     all_rows = []
+
     for img_path, prompt_paths in tqdm(
-        dataset_samples.items(), desc=f"sam2:{args.model_type}"
+        dataset_samples.items(),
+        desc=f"sam2:{args.model_type}",
     ):
         image = cv2.imread(str(img_path))
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {img_path}")
+
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         gt_mask_path = str(Path(masks_dir) / f"{Path(img_path).stem}.png")
         gt_mask = read_mask_gray(gt_mask_path)
 
         current_paths = [Path(gt_mask_path)] + list(prompt_paths)
+
         all_pred_masks = []
         all_boxes = []
 
         for start in range(0, len(current_paths), args.batch_size):
-            batch_paths = current_paths[start : start + args.batch_size]
-            predictor = set_image_as_batch_sam2(predictor, image, len(batch_paths))
+            batch_paths = current_paths[start: start + args.batch_size]
+
+            predictor = set_image_as_batch_sam2(
+                predictor,
+                image,
+                len(batch_paths),
+            )
 
             batch_boxes = []
             for mask_path in batch_paths:
                 prompt_mask = read_mask_gray(str(mask_path))
-                batch_boxes.append(get_bbox_from_mask(prompt_mask))
+                bbox = get_bbox_from_mask(prompt_mask)
+                batch_boxes.append(bbox)
 
             batch_boxes_np = np.stack(batch_boxes)
 
@@ -431,6 +563,7 @@ def evaluate_sam2_family(
                 box_batch=batch_boxes_np,
                 multimask_output=False,
             )
+
             predictor.reset_predictor()
 
             all_pred_masks.append(pred_masks.astype(bool))
@@ -460,14 +593,17 @@ def evaluate_sam2_family(
 
 def main() -> None:
     args = parse_args()
+
     os.makedirs(args.output_dir, exist_ok=True)
 
     images_dir, prompts_dir, masks_dir = resolve_dataset_paths(args)
 
     if args.family == "sam2":
         df = evaluate_sam2_family(args, images_dir, prompts_dir, masks_dir)
+
     elif args.family == "sammed2d":
         df = evaluate_sammed2d_family(args, images_dir, prompts_dir, masks_dir)
+
     else:
         df = evaluate_standard_family(args, images_dir, prompts_dir, masks_dir)
 
@@ -479,6 +615,11 @@ def main() -> None:
         df.to_csv(output_path, index=False)
 
     if args.print_ious:
+        if len(df) == 0:
+            print("No samples were evaluated.")
+            print("Check dataset paths and SAMMED2D_ALLOWED_PREFIXES.")
+            return
+
         print(df[["image_path", "mask_path", "iou"]].to_string(index=False))
         print("\nMean IoU:", float(df["iou"].mean()))
         print("Median IoU:", float(df["iou"].median()))
